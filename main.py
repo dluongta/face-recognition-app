@@ -19,10 +19,15 @@ FACES_DIR = "faces"
 # Ngưỡng nhận diện.
 # Càng nhỏ thì càng khó nhận nhầm nhưng dễ nhận thành Unknown.
 FACE_DISTANCE_THRESHOLD = 0.50
-
+# Số chữ số hiển thị distance
+DISTANCE_DECIMALS = 3
 # Kích thước ảnh webcam đem đi nhận diện
 PROCESS_SCALE = 0.25
 
+last_face_results = []
+recognition_frame_counter = 0
+
+RECOGNITION_INTERVAL = 3
 
 # ============================================================
 # GLOBAL DATA
@@ -61,13 +66,26 @@ if not os.path.exists(FACES_DIR):
 
 def load_known_faces():
     """
-    Đọc toàn bộ ảnh trong thư mục faces/
-    và tạo face encoding.
+    Load toàn bộ khuôn mặt từ:
+
+        faces/
+            An/
+                001.jpg
+                002.jpg
+                003.jpg
+
+            Binh/
+                001.jpg
+                002.jpg
+
+    Mỗi người có nhiều face encoding.
     """
 
+    global person_encodings
     global known_face_encodings
     global known_face_names
 
+    person_encodings = {}
     known_face_encodings = []
     known_face_names = []
 
@@ -76,64 +94,114 @@ def load_known_faces():
     if not os.path.exists(FACES_DIR):
         os.makedirs(FACES_DIR)
 
-    # Mỗi folder con là một người
     for person_name in os.listdir(FACES_DIR):
 
-        person_folder = os.path.join(FACES_DIR, person_name)
+        person_folder = os.path.join(
+            FACES_DIR,
+            person_name
+        )
 
         if not os.path.isdir(person_folder):
             continue
 
+        person_encodings[person_name] = []
+
         for filename in os.listdir(person_folder):
 
-            file_path = os.path.join(person_folder, filename)
+            file_path = os.path.join(
+                person_folder,
+                filename
+            )
 
-            # Chỉ đọc các file ảnh
             if not filename.lower().endswith(
                 (".jpg", ".jpeg", ".png", ".bmp", ".webp")
             ):
                 continue
 
             try:
-                image = face_recognition.load_image_file(file_path)
 
-                face_locations = face_recognition.face_locations(image)
+                image = face_recognition.load_image_file(
+                    file_path
+                )
+
+                face_locations = face_recognition.face_locations(
+                    image,
+                    model="hog"
+                )
 
                 if len(face_locations) == 0:
+
                     print(
-                        f"[WARNING] Không tìm thấy khuôn mặt: {file_path}"
+                        f"[WARNING] Không có mặt: {file_path}"
                     )
+
                     continue
 
                 if len(face_locations) > 1:
+
                     print(
-                        f"[WARNING] Có nhiều khuôn mặt: {file_path}"
+                        f"[WARNING] Có nhiều mặt: {file_path}"
                     )
-                    print(
-                        "         Bỏ qua ảnh này để tránh đăng ký sai."
-                    )
+
                     continue
 
                 encodings = face_recognition.face_encodings(
                     image,
-                    face_locations
+                    face_locations,
+                    num_jitters=2,
+                    model="small"
                 )
 
-                if len(encodings) == 0:
+                if not encodings:
                     continue
 
-                known_face_encodings.append(encodings[0])
-                known_face_names.append(person_name)
+                encoding = encodings[0]
 
-                print(f"[OK] {person_name}: {filename}")
+                # Lưu encoding theo từng người
+                person_encodings[
+                    person_name
+                ].append(encoding)
+
+                # Giữ database cũ nếu cần
+                known_face_encodings.append(
+                    encoding
+                )
+
+                known_face_names.append(
+                    person_name
+                )
+
+                print(
+                    f"[OK] {person_name}: {filename}"
+                )
 
             except Exception as e:
-                print(f"[ERROR] {file_path}: {e}")
+
+                print(
+                    f"[ERROR] {file_path}: {e}"
+                )
+
+        # Nếu người này không có ảnh hợp lệ
+        if len(person_encodings[person_name]) == 0:
+
+            del person_encodings[person_name]
 
     print(
-        f"\nĐã load {len(known_face_encodings)} ảnh khuôn mặt."
+        f"\nĐã load {len(known_face_names)} encoding."
     )
+
+    print(
+        f"Số người: {len(person_encodings)}"
+    )
+
+    for name, encodings in person_encodings.items():
+
+        print(
+            f"  - {name}: {len(encodings)} ảnh"
+        )
+
     print("==================================\n")
+
 
 
 # ============================================================
@@ -504,7 +572,10 @@ def verify_uploaded_image():
         )
         return
 
-    # Chọn ảnh
+    # ========================================================
+    # CHỌN ẢNH
+    # ========================================================
+
     file_path = filedialog.askopenfilename(
         title="Chọn ảnh cần xác minh",
         filetypes=[
@@ -523,7 +594,10 @@ def verify_uploaded_image():
 
     try:
 
-        # Đọc ảnh
+        # ====================================================
+        # ĐỌC ẢNH
+        # ====================================================
+
         image = cv2.imread(file_path)
 
         if image is None:
@@ -533,7 +607,10 @@ def verify_uploaded_image():
             )
             return
 
-        # Resize để nhận diện nhanh hơn
+        # ====================================================
+        # RESIZE
+        # ====================================================
+
         small_image = cv2.resize(
             image,
             (0, 0),
@@ -547,7 +624,10 @@ def verify_uploaded_image():
             cv2.COLOR_BGR2RGB
         )
 
-        # Tìm khuôn mặt
+        # ====================================================
+        # TÌM KHUÔN MẶT
+        # ====================================================
+
         face_locations = face_recognition.face_locations(
             rgb_small_image,
             model="hog"
@@ -562,10 +642,15 @@ def verify_uploaded_image():
 
             return
 
-        # Encoding
+        # ====================================================
+        # TẠO FACE ENCODING
+        # ====================================================
+
         face_encodings = face_recognition.face_encodings(
             rgb_small_image,
-            face_locations
+            face_locations,
+            num_jitters=1,
+            model="small"
         )
 
         results = []
@@ -577,43 +662,80 @@ def verify_uploaded_image():
         for face_encoding in face_encodings:
 
             name = "Unknown"
-            distance_text = ""
 
-            # Tính khoảng cách với database
-            face_distances = face_recognition.face_distance(
-                known_face_encodings,
-                face_encoding
-            )
+            best_person = None
+            best_distance = float("inf")
 
-            best_match_index = np.argmin(
-                face_distances
-            )
+            # =================================================
+            # SO SÁNH VỚI TỪNG NGƯỜI
+            # =================================================
 
-            best_distance = face_distances[
-                best_match_index
-            ]
+            for person_name, encodings in person_encodings.items():
 
-            # Kiểm tra threshold
-            if best_distance <= FACE_DISTANCE_THRESHOLD:
+                if not encodings:
+                    continue
 
-                name = known_face_names[
-                    best_match_index
-                ]
+                distances = face_recognition.face_distance(
+                    encodings,
+                    face_encoding
+                )
+
+                person_best_distance = np.min(
+                    distances
+                )
+
+                if person_best_distance < best_distance:
+
+                    best_distance = person_best_distance
+                    best_person = person_name
+
+            # =================================================
+            # TÍNH CONFIDENCE %
+            # GIỐNG CAMERA
+            # =================================================
+
+            if best_distance != float("inf"):
+
+                confidence = (
+                    1 - best_distance
+                ) * 100
 
                 confidence = max(
                     0,
                     min(
                         100,
-                        (1 - best_distance) * 100
+                        confidence
                     )
                 )
 
-                distance_text = (
-                    f"{confidence:.1f}%"
-                )
+            else:
+
+                confidence = 0
+
+            # =================================================
+            # KIỂM TRA THRESHOLD
+            # =================================================
+
+            if (
+                best_person is not None
+                and best_distance <= FACE_DISTANCE_THRESHOLD
+            ):
+
+                name = best_person
+
+            else:
+
+                name = "Unknown"
+
+            confidence_text = (
+                f"{confidence:.1f}%"
+            )
 
             results.append(
-                (name, distance_text)
+                (
+                    name,
+                    confidence_text
+                )
             )
 
         # ====================================================
@@ -635,13 +757,19 @@ def verify_uploaded_image():
             bottom = int(bottom / PROCESS_SCALE)
             left = int(left / PROCESS_SCALE)
 
-            # Màu
+            # =================================================
+            # MÀU
+            # =================================================
+
             if name == "Unknown":
                 color = (0, 0, 255)
             else:
                 color = (0, 200, 0)
 
-            # Vẽ box
+            # =================================================
+            # FACE BOX
+            # =================================================
+
             cv2.rectangle(
                 image,
                 (left, top),
@@ -650,16 +778,13 @@ def verify_uploaded_image():
                 3
             )
 
-            # Label
-            label = name
+            # =================================================
+            # LABEL
+            # =================================================
 
-            if confidence_text:
-                label += f" ({confidence_text})"
-
-            # ====================================================
-            # LABEL SÁT MÉP DƯỚI KHUNG KHUÔN MẶT
-            # Nằm phía trên mép dưới của box
-            # ====================================================
+            label = (
+                f"{name} ({confidence_text})"
+            )
 
             text_size = cv2.getTextSize(
                 label,
@@ -668,14 +793,20 @@ def verify_uploaded_image():
                 2
             )[0]
 
-            # Đặt đáy của label sát mép dưới của face box
+            # Đặt label sát mép dưới face box
             label_y = bottom - 3
 
-            # Chiều cao background label
-            label_top = label_y - text_size[1] - 10
-            label_bottom = label_y + 5
+            label_top = (
+                label_y
+                - text_size[1]
+                - 10
+            )
 
-            # Nếu label vượt quá mép trên của khuôn mặt
+            label_bottom = (
+                label_y + 5
+            )
+
+            # Nếu label vượt quá phía trên face box
             if label_top < top:
 
                 label_top = top
@@ -686,11 +817,13 @@ def verify_uploaded_image():
                     + 5
                 )
 
-                label_bottom = label_y + 5
+                label_bottom = (
+                    label_y + 5
+                )
 
-            # ====================================================
+            # =================================================
             # BACKGROUND
-            # ====================================================
+            # =================================================
 
             cv2.rectangle(
                 image,
@@ -706,9 +839,9 @@ def verify_uploaded_image():
                 -1
             )
 
-            # ====================================================
+            # =================================================
             # TEXT
-            # ====================================================
+            # =================================================
 
             cv2.putText(
                 image,
@@ -723,7 +856,6 @@ def verify_uploaded_image():
                 2
             )
 
-
         # ====================================================
         # HIỂN THỊ ẢNH KẾT QUẢ
         # ====================================================
@@ -737,7 +869,10 @@ def verify_uploaded_image():
             image_rgb
         )
 
-        # Tạo cửa sổ kết quả
+        # ====================================================
+        # TẠO CỬA SỔ KẾT QUẢ
+        # ====================================================
+
         result_window = tk.Toplevel(root)
 
         result_window.title(
@@ -815,23 +950,20 @@ def verify_uploaded_image():
         # HIỂN THỊ TEXT KẾT QUẢ
         # ====================================================
 
-        result_text = "Kết quả xác minh:\n\n"
+        result_text = (
+            "Kết quả xác minh:\n\n"
+        )
 
-        for index, (name, confidence) in enumerate(
+        for index, (name, confidence_text) in enumerate(
             results,
             start=1
         ):
 
-            if confidence:
-                result_text += (
-                    f"Khuôn mặt {index}: "
-                    f"{name} - {confidence}\n"
-                )
-            else:
-                result_text += (
-                    f"Khuôn mặt {index}: "
-                    f"{name}\n"
-                )
+            result_text += (
+                f"Khuôn mặt {index}: "
+                f"{name} - confidence: "
+                f"{confidence_text}\n"
+            )
 
         result_label = tk.Label(
             result_window,
@@ -844,6 +976,10 @@ def verify_uploaded_image():
         result_label.pack(
             pady=10
         )
+
+        # ====================================================
+        # NÚT ĐÓNG
+        # ====================================================
 
         tk.Button(
             result_window,
@@ -865,85 +1001,110 @@ def verify_uploaded_image():
             f"Không thể xử lý ảnh:\n\n{e}"
         )
 
-
 # ============================================================
 # RECOGNIZE FACE
 # ============================================================
 
 def recognize_faces(frame):
-    """
-    Nhận diện khuôn mặt trong frame webcam.
 
-    Return:
-        frame đã được vẽ box + tên
-    """
+    global last_face_results
+    global recognition_frame_counter
 
-    # Resize để tăng tốc
-    small_frame = cv2.resize(
-        frame,
-        (0, 0),
-        fx=PROCESS_SCALE,
-        fy=PROCESS_SCALE
-    )
+    recognition_frame_counter += 1
 
-    # OpenCV dùng BGR
-    # face_recognition dùng RGB
-    rgb_small_frame = cv2.cvtColor(
-        small_frame,
-        cv2.COLOR_BGR2RGB
-    )
+    # ========================================================
+    # CHỈ NHẬN DIỆN MỖI N FRAME
+    # ========================================================
 
-    # Tìm khuôn mặt
-    face_locations = face_recognition.face_locations(
-        rgb_small_frame,
-        model="hog"
-    )
+    if recognition_frame_counter % RECOGNITION_INTERVAL == 0:
 
-    face_encodings = face_recognition.face_encodings(
-        rgb_small_frame,
-        face_locations
-    )
+        small_frame = cv2.resize(
+            frame,
+            (0, 0),
+            fx=PROCESS_SCALE,
+            fy=PROCESS_SCALE
+        )
 
-    # Duyệt từng khuôn mặt
-    for face_encoding, face_location in zip(
-        face_encodings,
-        face_locations
-    ):
+        rgb_small_frame = cv2.cvtColor(
+            small_frame,
+            cv2.COLOR_BGR2RGB
+        )
 
-        name = "Unknown"
-        confidence_text = ""
+        # ====================================================
+        # TÌM KHUÔN MẶT
+        # ====================================================
 
-        # Nếu database có người
-        if len(known_face_encodings) > 0:
+        face_locations = face_recognition.face_locations(
+            rgb_small_frame,
+            model="hog"
+        )
 
-            # Tính khoảng cách
-            face_distances = face_recognition.face_distance(
-                known_face_encodings,
-                face_encoding
-            )
+        face_encodings = face_recognition.face_encodings(
+            rgb_small_frame,
+            face_locations,
+            num_jitters=1,
+            model="small"
+        )
 
-            # Vị trí khoảng cách nhỏ nhất
-            best_match_index = np.argmin(
-                face_distances
-            )
+        results = []
 
-            best_distance = face_distances[
-                best_match_index
-            ]
+        # ====================================================
+        # NHẬN DIỆN TỪNG KHUÔN MẶT
+        # ====================================================
 
-            # Chỉ nhận nếu khoảng cách đủ nhỏ
-            if best_distance <= FACE_DISTANCE_THRESHOLD:
+        for face_encoding, face_location in zip(
+            face_encodings,
+            face_locations
+        ):
 
-                name = known_face_names[
-                    best_match_index
-                ]
+            name = "Unknown"
+            confidence_text = ""
 
-                # Chuyển distance thành điểm tương đối
+            best_person = None
+            best_distance = float("inf")
+
+            # =================================================
+            # SO SÁNH VỚI TỪNG NGƯỜI
+            # =================================================
+
+            for person_name, encodings in person_encodings.items():
+
+                if not encodings:
+                    continue
+
+                distances = face_recognition.face_distance(
+                    encodings,
+                    face_encoding
+                )
+
+                person_best_distance = np.min(distances)
+
+                if person_best_distance < best_distance:
+
+                    best_distance = person_best_distance
+                    best_person = person_name
+
+            # =================================================
+            # KIỂM TRA THRESHOLD
+            # =================================================
+
+            if (
+                best_person is not None
+                and best_distance <= FACE_DISTANCE_THRESHOLD
+            ):
+
+                name = best_person
+
+                # Quy đổi distance sang %
+                confidence = (
+                    1 - best_distance
+                ) * 100
+
                 confidence = max(
                     0,
                     min(
                         100,
-                        (1 - best_distance) * 100
+                        confidence
                     )
                 )
 
@@ -951,22 +1112,64 @@ def recognize_faces(frame):
                     f"{confidence:.1f}%"
                 )
 
-        # Tọa độ trên frame nhỏ
+            else:
+
+                # Unknown vẫn hiển thị % gần nhất
+                if best_distance != float("inf"):
+
+                    confidence = (
+                        1 - best_distance
+                    ) * 100
+
+                    confidence = max(
+                        0,
+                        min(
+                            100,
+                            confidence
+                        )
+                    )
+
+                    confidence_text = (
+                        f"{confidence:.1f}%"
+                    )
+
+            results.append(
+                (
+                    face_location,
+                    name,
+                    confidence_text
+                )
+            )
+
+        # Lưu kết quả để các frame tiếp theo sử dụng
+        last_face_results = results
+
+    # ========================================================
+    # VẼ KẾT QUẢ
+    # ========================================================
+
+    for face_location, name, confidence_text in last_face_results:
+
         top, right, bottom, left = face_location
 
-        # Đưa về kích thước frame gốc
         top = int(top / PROCESS_SCALE)
         right = int(right / PROCESS_SCALE)
         bottom = int(bottom / PROCESS_SCALE)
         left = int(left / PROCESS_SCALE)
 
-        # Màu box
-        if name == "Unknown":
-            color = (0, 0, 255)       # Đỏ
-        else:
-            color = (0, 200, 0)       # Xanh
+        # ====================================================
+        # MÀU
+        # ====================================================
 
-        # Vẽ khuôn mặt
+        if name == "Unknown":
+            color = (0, 0, 255)
+        else:
+            color = (0, 200, 0)
+
+        # ====================================================
+        # FACE BOX
+        # ====================================================
+
         cv2.rectangle(
             frame,
             (left, top),
@@ -975,16 +1178,15 @@ def recognize_faces(frame):
             2
         )
 
-        # Vùng tên
+        # ====================================================
+        # LABEL
+        # ====================================================
+
         label = name
 
         if confidence_text:
             label += f" ({confidence_text})"
 
-# ====================================================
-# LABEL SÁT MÉP DƯỚI KHUNG KHUÔN MẶT
-# ====================================================
-
         text_size = cv2.getTextSize(
             label,
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -992,35 +1194,51 @@ def recognize_faces(frame):
             2
         )[0]
 
-        # Đặt label ngay phía trên mép dưới của face box
         label_y = bottom - 3
 
-        # Nếu label quá cao thì vẫn giữ trong khuôn mặt
-        if label_y - text_size[1] - 10 < top:
-            label_y = top + text_size[1] + 10
+        # Nếu label vượt quá phía trên face box
+        if (
+            label_y
+            - text_size[1]
+            - 10
+            < top
+        ):
 
+            label_y = (
+                top
+                + text_size[1]
+                + 10
+            )
 
-        # Background cho text
-        text_size = cv2.getTextSize(
-            label,
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            2
-        )[0]
+        # ====================================================
+        # LABEL BACKGROUND
+        # ====================================================
 
         cv2.rectangle(
             frame,
-            (left, label_y - text_size[1] - 10),
-            (left + text_size[0] + 10, label_y + 5),
+            (
+                left,
+                label_y - text_size[1] - 10
+            ),
+            (
+                left + text_size[0] + 10,
+                label_y + 5
+            ),
             color,
             -1
         )
 
-        # Text
+        # ====================================================
+        # LABEL TEXT
+        # ====================================================
+
         cv2.putText(
             frame,
             label,
-            (left + 5, label_y - 3),
+            (
+                left + 5,
+                label_y - 3
+            ),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (255, 255, 255),
@@ -1419,7 +1637,7 @@ def update_camera():
         if max_width <= 1 or max_height <= 1:
 
             camera_after_id = root.after(
-                10,
+                30,
                 update_camera
             )
 
