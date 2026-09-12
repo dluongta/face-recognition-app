@@ -656,6 +656,11 @@ def verify_uploaded_image():
             if confidence_text:
                 label += f" ({confidence_text})"
 
+            # ====================================================
+            # LABEL SÁT MÉP DƯỚI KHUNG KHUÔN MẶT
+            # Nằm phía trên mép dưới của box
+            # ====================================================
+
             text_size = cv2.getTextSize(
                 label,
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -663,39 +668,61 @@ def verify_uploaded_image():
                 2
             )[0]
 
-            label_y = bottom + 35
+            # Đặt đáy của label sát mép dưới của face box
+            label_y = bottom - 3
 
-            if label_y > image.shape[0] - 5:
-                label_y = bottom - 10
+            # Chiều cao background label
+            label_top = label_y - text_size[1] - 10
+            label_bottom = label_y + 5
 
-            # Background
+            # Nếu label vượt quá mép trên của khuôn mặt
+            if label_top < top:
+
+                label_top = top
+
+                label_y = (
+                    label_top
+                    + text_size[1]
+                    + 5
+                )
+
+                label_bottom = label_y + 5
+
+            # ====================================================
+            # BACKGROUND
+            # ====================================================
+
             cv2.rectangle(
                 image,
                 (
                     left,
-                    label_y - text_size[1] - 10
+                    label_top
                 ),
                 (
                     left + text_size[0] + 10,
-                    label_y + 5
+                    label_bottom
                 ),
                 color,
                 -1
             )
 
-            # Text
+            # ====================================================
+            # TEXT
+            # ====================================================
+
             cv2.putText(
                 image,
                 label,
                 (
                     left + 5,
-                    label_y - 3
+                    label_y
                 ),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.8,
                 (255, 255, 255),
                 2
             )
+
 
         # ====================================================
         # HIỂN THỊ ẢNH KẾT QUẢ
@@ -954,11 +981,24 @@ def recognize_faces(frame):
         if confidence_text:
             label += f" ({confidence_text})"
 
-        label_y = bottom + 30
+# ====================================================
+# LABEL SÁT MÉP DƯỚI KHUNG KHUÔN MẶT
+# ====================================================
 
-        # Không để label ra ngoài ảnh
-        if label_y > frame.shape[0] - 5:
-            label_y = bottom - 10
+        text_size = cv2.getTextSize(
+            label,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            2
+        )[0]
+
+        # Đặt label ngay phía trên mép dưới của face box
+        label_y = bottom - 3
+
+        # Nếu label quá cao thì vẫn giữ trong khuôn mặt
+        if label_y - text_size[1] - 10 < top:
+            label_y = top + text_size[1] + 10
+
 
         # Background cho text
         text_size = cv2.getTextSize(
