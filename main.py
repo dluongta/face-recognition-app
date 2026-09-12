@@ -1140,7 +1140,7 @@ def recognize_faces(frame):
     recognition_frame_counter += 1
 
     # ========================================================
-    # CHỈ NHẬN DIỆN MỖI N FRAME
+    # NHẬN DIỆN MỖI N FRAME
     # ========================================================
 
     should_recognize = (
@@ -1149,17 +1149,62 @@ def recognize_faces(frame):
 
     if should_recognize:
 
-        # Nếu database trống
+        # ====================================================
+        # DATABASE TRỐNG
+        # ====================================================
+
         if not person_encodings:
 
-            last_face_results = []
+            # Vẫn tìm khuôn mặt để vẽ ô đỏ Unknown
+            try:
+
+                small_frame = cv2.resize(
+                    frame,
+                    None,
+                    fx=PROCESS_SCALE,
+                    fy=PROCESS_SCALE,
+                    interpolation=cv2.INTER_LINEAR
+                )
+
+                rgb_small_frame = cv2.cvtColor(
+                    small_frame,
+                    cv2.COLOR_BGR2RGB
+                )
+
+                face_locations = face_recognition.face_locations(
+                    rgb_small_frame,
+                    model="hog"
+                )
+
+                # Tất cả khuôn mặt đều là Unknown
+                last_face_results = []
+
+                for face_location in face_locations:
+
+                    last_face_results.append(
+                        (
+                            face_location,
+                            "Unknown",
+                            ""
+                        )
+                    )
+
+            except Exception as e:
+
+                print(
+                    f"[RECOGNITION ERROR] {e}"
+                )
+
+        # ====================================================
+        # DATABASE CÓ DỮ LIỆU
+        # ====================================================
 
         else:
 
             try:
 
                 # ============================================
-                # GIẢM KÍCH THƯỚC ẢNH
+                # GIẢM KÍCH THƯỚC
                 # ============================================
 
                 small_frame = cv2.resize(
@@ -1180,14 +1225,12 @@ def recognize_faces(frame):
                 )
 
                 # ============================================
-                # TÌM FACE
+                # TÌM KHUÔN MẶT
                 # ============================================
 
-                face_locations = (
-                    face_recognition.face_locations(
-                        rgb_small_frame,
-                        model="hog"
-                    )
+                face_locations = face_recognition.face_locations(
+                    rgb_small_frame,
+                    model="hog"
                 )
 
                 # Không có mặt
@@ -1198,7 +1241,7 @@ def recognize_faces(frame):
                 else:
 
                     # ========================================
-                    # TẠO ENCODING
+                    # FACE ENCODINGS
                     # ========================================
 
                     face_encodings = (
@@ -1213,7 +1256,7 @@ def recognize_faces(frame):
                     results = []
 
                     # ========================================
-                    # NHẬN DIỆN
+                    # NHẬN DIỆN TỪNG KHUÔN MẶT
                     # ========================================
 
                     for face_encoding, face_location in zip(
@@ -1225,7 +1268,7 @@ def recognize_faces(frame):
                         best_distance = float("inf")
 
                         # ====================================
-                        # SO SÁNH VỚI DATABASE
+                        # SO SÁNH DATABASE
                         # ====================================
 
                         for person_name, encodings in (
@@ -1257,7 +1300,7 @@ def recognize_faces(frame):
                                 )
 
                         # ====================================
-                        # TÍNH CONFIDENCE
+                        # XÁC ĐỊNH TÊN + CONFIDENCE
                         # ====================================
 
                         if (
@@ -1299,7 +1342,14 @@ def recognize_faces(frame):
 
                         else:
 
+                            # Quan trọng:
+                            # Không nhận diện được => Unknown
+                            # => vẽ ô màu đỏ
                             name = "Unknown"
+
+                        # ====================================
+                        # LUÔN LƯU KẾT QUẢ
+                        # ====================================
 
                         results.append(
                             (
@@ -1309,7 +1359,6 @@ def recognize_faces(frame):
                             )
                         )
 
-                    # Lưu kết quả
                     last_face_results = results
 
             except Exception as e:
@@ -1330,9 +1379,9 @@ def recognize_faces(frame):
 
         top, right, bottom, left = face_location
 
-        # ================================================
+        # ====================================================
         # SCALE NGƯỢC VỀ FRAME GỐC
-        # ================================================
+        # ====================================================
 
         top = int(
             top / PROCESS_SCALE
@@ -1350,9 +1399,9 @@ def recognize_faces(frame):
             left / PROCESS_SCALE
         )
 
-        # ================================================
+        # ====================================================
         # GIỚI HẠN TỌA ĐỘ
-        # ================================================
+        # ====================================================
 
         height, width = frame.shape[:2]
 
@@ -1376,12 +1425,13 @@ def recognize_faces(frame):
             min(bottom, height - 1)
         )
 
-        # ================================================
+        # ====================================================
         # MÀU
-        # ================================================
+        # ====================================================
 
         if name == "Unknown":
 
+            # Không nhận diện được => ĐỎ
             color = (
                 0,
                 0,
@@ -1390,15 +1440,16 @@ def recognize_faces(frame):
 
         else:
 
+            # Nhận diện được => XANH
             color = (
                 0,
                 200,
                 0
             )
 
-        # ================================================
+        # ====================================================
         # FACE BOX
-        # ================================================
+        # ====================================================
 
         cv2.rectangle(
             frame,
@@ -1409,9 +1460,9 @@ def recognize_faces(frame):
             cv2.LINE_AA
         )
 
-        # ================================================
+        # ====================================================
         # LABEL
-        # ================================================
+        # ====================================================
 
         label = name
 
@@ -1436,49 +1487,49 @@ def recognize_faces(frame):
             text_size[1] + 10
         )
 
-        # Ưu tiên đặt label phía trên khuôn mặt
-        label_top = (
-            top - label_height
-        )
+        # ====================================================
+        # VỊ TRÍ LABEL
+        # Đặt phía trên khuôn mặt, sát bên phải bounding box
+        # ====================================================
 
+        label_top = top - label_height
+
+        # Mặc định: cạnh phải của label trùng với cạnh phải khuôn mặt
+        label_right = right
+        label_left = label_right - label_width
+
+        # Nếu label bị vượt bên trái màn hình
+        if label_left < 0:
+            label_left = 0
+            label_right = label_width
+
+        # Nếu phía trên khuôn mặt không đủ chỗ
         if label_top < 0:
+            label_top = 0
 
-            label_top = bottom
+        label_bottom = label_top + label_height
 
-        label_bottom = (
-            label_top
-            + label_height
-        )
+        # Không vượt quá chiều cao ảnh
+        if label_bottom > height:
+            label_bottom = height
 
-        # Không vượt quá ảnh
-        label_bottom = min(
-            label_bottom,
-            height
-        )
 
-        label_right = min(
-            left + label_width,
-            width
-        )
-
-        # ================================================
-        # BACKGROUND
-        # ================================================
+        # ====================================================
+        # BACKGROUND LABEL
+        # ====================================================
 
         cv2.rectangle(
             frame,
-            (left, label_top),
-            (
-                label_right,
-                label_bottom
-            ),
+            (label_left, label_top),
+            (label_right, label_bottom),
             color,
             -1
         )
 
-        # ================================================
+
+        # ====================================================
         # TEXT
-        # ================================================
+        # ====================================================
 
         text_y = (
             label_top
@@ -1490,7 +1541,7 @@ def recognize_faces(frame):
             frame,
             label,
             (
-                left + 5,
+                label_left + 5,
                 text_y
             ),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -1500,8 +1551,8 @@ def recognize_faces(frame):
             cv2.LINE_AA
         )
 
-    return frame
 
+    return frame
 
 
 # ============================================================
