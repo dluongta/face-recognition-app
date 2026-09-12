@@ -142,9 +142,18 @@ def load_known_faces():
 
 def register_person():
     """
-    Nhập tên + chọn ảnh.
+    Nhập tên + chọn nhiều ảnh.
     Ảnh được copy vào:
         faces/TEN_NGUOI/
+
+    Nếu người đó đã có ảnh:
+        001.jpg
+        002.jpg
+
+    thì ảnh mới sẽ tiếp tục:
+        003.jpg
+        004.jpg
+        ...
     """
 
     name = name_entry.get().strip()
@@ -169,11 +178,17 @@ def register_person():
         )
         return
 
-    # Chọn ảnh
+    # ========================================================
+    # CHỌN NHIỀU ẢNH
+    # ========================================================
+
     file_paths = filedialog.askopenfilenames(
         title="Chọn ảnh khuôn mặt",
         filetypes=[
-            ("Image files", "*.jpg *.jpeg *.png *.bmp *.webp"),
+            (
+                "Image files",
+                "*.jpg *.jpeg *.png *.bmp *.webp"
+            ),
             ("JPG", "*.jpg"),
             ("PNG", "*.png"),
             ("All files", "*.*")
@@ -183,40 +198,110 @@ def register_person():
     if not file_paths:
         return
 
+    # ========================================================
+    # TẠO FOLDER NGƯỜI
+    # ========================================================
+
     person_folder = os.path.join(
         FACES_DIR,
         name
     )
 
-    os.makedirs(person_folder, exist_ok=True)
+    os.makedirs(
+        person_folder,
+        exist_ok=True
+    )
+
+    # ========================================================
+    # TÌM SỐ THỨ TỰ LỚN NHẤT ĐANG CÓ
+    # ========================================================
+
+    max_number = 0
+
+    for filename in os.listdir(person_folder):
+
+        file_path = os.path.join(
+            person_folder,
+            filename
+        )
+
+        if not os.path.isfile(file_path):
+            continue
+
+        # Lấy tên file không có extension
+        file_name_without_ext = os.path.splitext(
+            filename
+        )[0]
+
+        # Nếu tên file là 001, 002, 003...
+        if file_name_without_ext.isdigit():
+
+            number = int(
+                file_name_without_ext
+            )
+
+            max_number = max(
+                max_number,
+                number
+            )
+
+    # Ảnh mới sẽ bắt đầu từ số tiếp theo
+    next_number = max_number + 1
 
     success_count = 0
+
+    # ========================================================
+    # XỬ LÝ TỪNG ẢNH
+    # ========================================================
 
     for file_path in file_paths:
 
         try:
-            # Kiểm tra ảnh có khuôn mặt không
-            image = face_recognition.load_image_file(file_path)
 
-            face_locations = face_recognition.face_locations(image)
+            # ------------------------------------------------
+            # Đọc ảnh
+            # ------------------------------------------------
 
+            image = face_recognition.load_image_file(
+                file_path
+            )
+
+            # ------------------------------------------------
+            # Tìm khuôn mặt
+            # ------------------------------------------------
+
+            face_locations = face_recognition.face_locations(
+                image
+            )
+
+            # Không có mặt
             if len(face_locations) == 0:
+
                 print(
                     f"[SKIP] Không có khuôn mặt: {file_path}"
                 )
+
                 continue
 
+            # Có nhiều mặt
             if len(face_locations) > 1:
+
                 print(
                     f"[SKIP] Có nhiều khuôn mặt: {file_path}"
                 )
+
                 continue
 
-            # Lấy tên file
-            extension = os.path.splitext(file_path)[1].lower()
+            # ------------------------------------------------
+            # Tạo tên file mới
+            # ------------------------------------------------
+
+            extension = os.path.splitext(
+                file_path
+            )[1].lower()
 
             new_filename = (
-                f"{success_count + 1:03d}{extension}"
+                f"{next_number:03d}{extension}"
             )
 
             destination = os.path.join(
@@ -224,17 +309,35 @@ def register_person():
                 new_filename
             )
 
+            # ------------------------------------------------
+            # Copy ảnh
+            # ------------------------------------------------
+
             shutil.copy2(
                 file_path,
                 destination
             )
 
+            print(
+                f"[OK] Đã thêm ảnh: "
+                f"{name}/{new_filename}"
+            )
+
             success_count += 1
 
+            # Tăng số cho ảnh tiếp theo
+            next_number += 1
+
         except Exception as e:
+
             print(
-                f"[ERROR] Không thể xử lý {file_path}: {e}"
+                f"[ERROR] Không thể xử lý "
+                f"{file_path}: {e}"
             )
+
+    # ========================================================
+    # KHÔNG CÓ ẢNH HỢP LỆ
+    # ========================================================
 
     if success_count == 0:
 
@@ -245,19 +348,30 @@ def register_person():
 
         return
 
-    # Load lại database
+    # ========================================================
+    # LOAD LẠI DATABASE
+    # ========================================================
+
     load_known_faces()
+
+    # ========================================================
+    # THÔNG BÁO
+    # ========================================================
 
     messagebox.showinfo(
         "Đăng ký thành công",
-        f"Đã đăng ký: {name}\n"
-        f"Số ảnh hợp lệ: {success_count}"
+        f"Người: {name}\n"
+        f"Đã thêm: {success_count} ảnh\n\n"
+        f"Tổng số ảnh hiện có: "
+        f"{next_number - 1}"
     )
 
+    # Xóa ô nhập tên
     name_entry.delete(
         0,
         tk.END
     )
+
 
 def delete_person():
     """Xóa toàn bộ ảnh của một người trong thư mục faces/"""
