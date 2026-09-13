@@ -22,15 +22,11 @@ FACE_DISTANCE_THRESHOLD = 0.50
 # Số chữ số hiển thị distance
 DISTANCE_DECIMALS = 3
 # Kích thước ảnh webcam đem đi nhận diện
-PROCESS_SCALE = 0.25
+PROCESS_SCALE = 0.50
 
 last_face_results = []
 recognition_frame_counter = 0
 
-RECOGNITION_INTERVAL = 3
-
-
-FACE_DISTANCE_THRESHOLD = 0.50
 
 DISTANCE_DECIMALS = 3
 
@@ -39,7 +35,14 @@ DISTANCE_DECIMALS = 3
 PROCESS_SCALE = 0.25
 
 # Nhận diện 1 lần sau mỗi N frame
-RECOGNITION_INTERVAL = 5
+RECOGNITION_INTERVAL = 3
+
+# Giữ khuôn mặt Unknown trong vài frame
+UNKNOWN_HOLD_FRAMES = 15
+
+# Số frame kể từ lần cuối tìm thấy khuôn mặt
+no_face_counter = 0
+
 
 # Camera hiển thị khoảng 25 FPS
 CAMERA_FPS = 25
@@ -1136,113 +1139,235 @@ def recognize_faces(frame):
 
     global last_face_results
     global recognition_frame_counter
+    global no_face_counter
 
     recognition_frame_counter += 1
 
     # ========================================================
-    # NHẬN DIỆN MỖI N FRAME
+    # RESIZE
     # ========================================================
 
-    should_recognize = (
-        recognition_frame_counter % RECOGNITION_INTERVAL == 0
+    small_frame = cv2.resize(
+        frame,
+        None,
+        fx=PROCESS_SCALE,
+        fy=PROCESS_SCALE,
+        interpolation=cv2.INTER_LINEAR
     )
 
-    if should_recognize:
+    rgb_small_frame = cv2.cvtColor(
+        small_frame,
+        cv2.COLOR_BGR2RGB
+    )
 
-        # ====================================================
-        # DATABASE TRỐNG
-        # ====================================================
+    # ========================================================
+    # TÌM KHUÔN MẶT
+    # ========================================================
 
-        if not person_encodings:
+    try:
 
-            # Vẫn tìm khuôn mặt để vẽ ô đỏ Unknown
-            try:
+        face_locations = face_recognition.face_locations(
+            rgb_small_frame,
+            model="hog"
+        )
 
-                small_frame = cv2.resize(
-                    frame,
-                    None,
-                    fx=PROCESS_SCALE,
-                    fy=PROCESS_SCALE,
-                    interpolation=cv2.INTER_LINEAR
-                )
+    except Exception as e:
 
-                rgb_small_frame = cv2.cvtColor(
-                    small_frame,
-                    cv2.COLOR_BGR2RGB
-                )
+        print(f"[FACE LOCATION ERROR] {e}")
 
-                face_locations = face_recognition.face_locations(
-                    rgb_small_frame,
-                    model="hog"
-                )
+        return frame
 
-                # Tất cả khuôn mặt đều là Unknown
-                last_face_results = []
+    # ========================================================
+    # DATABASE TRỐNG
+    # ========================================================
+    #
+    # CHƯA CÓ ẢNH ĐĂNG KÝ
+    #
+    # => Không cần face encoding
+    # => Chỉ cần phát hiện mặt là Unknown
+    #
 
-                for face_location in face_locations:
+    if not person_encodings:
 
-                    last_face_results.append(
-                        (
-                            face_location,
-                            "Unknown",
-                            ""
-                        )
+        if face_locations:
+
+            # Có mặt
+            no_face_counter = 0
+
+            last_face_results = []
+
+            for face_location in face_locations:
+
+                last_face_results.append(
+                    (
+                        face_location,
+                        "Unknown",
+                        ""
                     )
-
-            except Exception as e:
-
-                print(
-                    f"[RECOGNITION ERROR] {e}"
                 )
-
-        # ====================================================
-        # DATABASE CÓ DỮ LIỆU
-        # ====================================================
 
         else:
 
-            try:
+            # Không tìm thấy mặt ở frame này
+            no_face_counter += 1
 
-                # ============================================
-                # GIẢM KÍCH THƯỚC
-                # ============================================
+            # Không xóa Unknown ngay lập tức
+            if (
+                no_face_counter
+                > UNKNOWN_HOLD_FRAMES
+            ):
 
-                small_frame = cv2.resize(
-                    frame,
-                    None,
-                    fx=PROCESS_SCALE,
-                    fy=PROCESS_SCALE,
-                    interpolation=cv2.INTER_LINEAR
-                )
+                last_face_results = []
 
-                # ============================================
-                # BGR -> RGB
-                # ============================================
+    # ========================================================
+    # DATABASE CÓ NGƯỜI
+    # ========================================================
 
-                rgb_small_frame = cv2.cvtColor(
-                    small_frame,
-                    cv2.COLOR_BGR2RGB
-                )
+    else:
 
-                # ============================================
-                # TÌM KHUÔN MẶT
-                # ============================================
+        # Có mặt
+        if face_locations:
 
-                face_locations = face_recognition.face_locations(
-                    rgb_small_frame,
-                    model="hog"
-                )
+            no_face_counter = 0
 
-                # Không có mặt
-                if not face_locations:
+        else:
 
-                    last_face_results = []
+            no_face_counter += 1
 
-                else:
+            # Nếu không thấy mặt một thời gian
+            # thì xóa box
+            if (
+                no_face_counter
+                > UNKNOWN_HOLD_FRAMES
+            ):
 
-                    # ========================================
-                    # FACE ENCODINGS
-                    # ========================================
+                last_face_results = []
+
+                return frame
+
+        # ====================================================
+        # CHỈ NHẬN DIỆN MỖI N FRAME
+        # ====================================================
+
+        should_recognize = (
+            recognition_frame_counter
+            % RECOGNITION_INTERVAL
+            == 0
+        )
+
+        # ====================================================
+        # NẾU CÓ KHUÔN MẶT
+        # ====================================================
+
+        if face_locations:
+
+            # ================================================
+            # CHƯA ĐẾN FRAME NHẬN DIỆN
+            # ================================================
+
+            if not should_recognize:
+
+                old_results = last_face_results
+
+                new_results = []
+
+                for face_location in face_locations:
+
+                    name = "Unknown"
+                    confidence_text = ""
+
+                    # ----------------------------------------
+                    # Nếu có kết quả cũ
+                    # ----------------------------------------
+
+                    if old_results:
+
+                        current_top, current_right, current_bottom, current_left = (
+                            face_location
+                        )
+
+                        current_center_x = (
+                            current_left
+                            + current_right
+                        ) / 2
+
+                        current_center_y = (
+                            current_top
+                            + current_bottom
+                        ) / 2
+
+                        best_old = None
+                        best_distance = float("inf")
+
+                        for (
+                            old_location,
+                            old_name,
+                            old_confidence
+                        ) in old_results:
+
+                            (
+                                old_top,
+                                old_right,
+                                old_bottom,
+                                old_left
+                            ) = old_location
+
+                            old_center_x = (
+                                old_left
+                                + old_right
+                            ) / 2
+
+                            old_center_y = (
+                                old_top
+                                + old_bottom
+                            ) / 2
+
+                            distance = (
+                                (
+                                    current_center_x
+                                    - old_center_x
+                                ) ** 2
+                                +
+                                (
+                                    current_center_y
+                                    - old_center_y
+                                ) ** 2
+                            )
+
+                            if distance < best_distance:
+
+                                best_distance = distance
+
+                                best_old = (
+                                    old_name,
+                                    old_confidence
+                                )
+
+                        if best_old is not None:
+
+                            name = best_old[0]
+
+                            confidence_text = (
+                                best_old[1]
+                            )
+
+                    new_results.append(
+                        (
+                            face_location,
+                            name,
+                            confidence_text
+                        )
+                    )
+
+                last_face_results = new_results
+
+            # ================================================
+            # ĐẾN FRAME NHẬN DIỆN
+            # ================================================
+
+            else:
+
+                try:
 
                     face_encodings = (
                         face_recognition.face_encodings(
@@ -1255,11 +1380,10 @@ def recognize_faces(frame):
 
                     results = []
 
-                    # ========================================
-                    # NHẬN DIỆN TỪNG KHUÔN MẶT
-                    # ========================================
-
-                    for face_encoding, face_location in zip(
+                    for (
+                        face_encoding,
+                        face_location
+                    ) in zip(
                         face_encodings,
                         face_locations
                     ):
@@ -1271,9 +1395,10 @@ def recognize_faces(frame):
                         # SO SÁNH DATABASE
                         # ====================================
 
-                        for person_name, encodings in (
-                            person_encodings.items()
-                        ):
+                        for (
+                            person_name,
+                            encodings
+                        ) in person_encodings.items():
 
                             if not encodings:
                                 continue
@@ -1289,7 +1414,10 @@ def recognize_faces(frame):
                                 np.min(distances)
                             )
 
-                            if person_distance < best_distance:
+                            if (
+                                person_distance
+                                < best_distance
+                            ):
 
                                 best_distance = (
                                     person_distance
@@ -1300,16 +1428,18 @@ def recognize_faces(frame):
                                 )
 
                         # ====================================
-                        # XÁC ĐỊNH TÊN + CONFIDENCE
+                        # CONFIDENCE
                         # ====================================
 
                         if (
                             best_person is not None
-                            and best_distance != float("inf")
+                            and best_distance
+                            != float("inf")
                         ):
 
                             confidence = (
-                                1.0 - best_distance
+                                1.0
+                                - best_distance
                             ) * 100
 
                             confidence = max(
@@ -1329,7 +1459,7 @@ def recognize_faces(frame):
                             confidence_text = ""
 
                         # ====================================
-                        # CHECK THRESHOLD
+                        # THRESHOLD
                         # ====================================
 
                         if (
@@ -1342,14 +1472,7 @@ def recognize_faces(frame):
 
                         else:
 
-                            # Quan trọng:
-                            # Không nhận diện được => Unknown
-                            # => vẽ ô màu đỏ
                             name = "Unknown"
-
-                        # ====================================
-                        # LUÔN LƯU KẾT QUẢ
-                        # ====================================
 
                         results.append(
                             (
@@ -1361,11 +1484,26 @@ def recognize_faces(frame):
 
                     last_face_results = results
 
-            except Exception as e:
+                except Exception as e:
 
-                print(
-                    f"[RECOGNITION ERROR] {e}"
-                )
+                    print(
+                        f"[RECOGNITION ERROR] {e}"
+                    )
+
+                    # Không nhận diện được
+                    # => Unknown
+
+                    last_face_results = []
+
+                    for face_location in face_locations:
+
+                        last_face_results.append(
+                            (
+                                face_location,
+                                "Unknown",
+                                ""
+                            )
+                        )
 
     # ========================================================
     # VẼ KẾT QUẢ
@@ -1380,7 +1518,7 @@ def recognize_faces(frame):
         top, right, bottom, left = face_location
 
         # ====================================================
-        # SCALE NGƯỢC VỀ FRAME GỐC
+        # SCALE VỀ FRAME GỐC
         # ====================================================
 
         top = int(
@@ -1400,7 +1538,7 @@ def recognize_faces(frame):
         )
 
         # ====================================================
-        # GIỚI HẠN TỌA ĐỘ
+        # GIỚI HẠN
         # ====================================================
 
         height, width = frame.shape[:2]
@@ -1431,7 +1569,6 @@ def recognize_faces(frame):
 
         if name == "Unknown":
 
-            # Không nhận diện được => ĐỎ
             color = (
                 0,
                 0,
@@ -1440,7 +1577,6 @@ def recognize_faces(frame):
 
         else:
 
-            # Nhận diện được => XANH
             color = (
                 0,
                 200,
@@ -1487,35 +1623,37 @@ def recognize_faces(frame):
             text_size[1] + 10
         )
 
-        # ====================================================
-        # VỊ TRÍ LABEL
-        # Đặt phía trên khuôn mặt, sát bên phải bounding box
-        # ====================================================
+        label_top = (
+            top - label_height
+        )
 
-        label_top = top - label_height
-
-        # Mặc định: cạnh phải của label trùng với cạnh phải khuôn mặt
         label_right = right
-        label_left = label_right - label_width
 
-        # Nếu label bị vượt bên trái màn hình
+        label_left = (
+            label_right
+            - label_width
+        )
+
         if label_left < 0:
+
             label_left = 0
             label_right = label_width
 
-        # Nếu phía trên khuôn mặt không đủ chỗ
         if label_top < 0:
+
             label_top = 0
 
-        label_bottom = label_top + label_height
+        label_bottom = (
+            label_top
+            + label_height
+        )
 
-        # Không vượt quá chiều cao ảnh
         if label_bottom > height:
+
             label_bottom = height
 
-
         # ====================================================
-        # BACKGROUND LABEL
+        # LABEL BACKGROUND
         # ====================================================
 
         cv2.rectangle(
@@ -1525,7 +1663,6 @@ def recognize_faces(frame):
             color,
             -1
         )
-
 
         # ====================================================
         # TEXT
@@ -1551,42 +1688,14 @@ def recognize_faces(frame):
             cv2.LINE_AA
         )
 
-
     return frame
+
 
 
 # ============================================================
 # CAMERA
 # ============================================================
 
-# def start_camera():
-
-#     global camera
-#     global camera_running
-
-#     if camera_running:
-#         return
-
-#     camera = cv2.VideoCapture(0)
-
-#     if not camera.isOpened():
-
-#         messagebox.showerror(
-#             "Camera Error",
-#             "Không thể mở camera.\n"
-#             "Hãy kiểm tra webcam."
-#         )
-
-#         camera = None
-#         return
-
-#     camera_running = True
-
-#     camera_button.config(
-#         text="Đang nhận diện..."
-#     )
-
-#     update_camera()
 
 def start_camera():
 
@@ -1742,206 +1851,6 @@ def stop_camera():
             pass
 
 
-
-# def update_camera():
-
-#     global camera_running
-
-#     if not camera_running:
-#         return
-
-#     if camera is None:
-#         return
-
-#     ret, frame = camera.read()
-
-#     if not ret:
-
-#         stop_camera()
-
-#         messagebox.showerror(
-#             "Camera Error",
-#             "Không đọc được hình ảnh từ camera."
-#         )
-
-#         return
-
-#     # Lật camera giống camera selfie
-#     frame = cv2.flip(
-#         frame,
-#         1
-#     )
-
-#     # Nhận diện
-#     frame = recognize_faces(
-#         frame
-#     )
-
-#     # OpenCV BGR -> RGB
-#     frame_rgb = cv2.cvtColor(
-#         frame,
-#         cv2.COLOR_BGR2RGB
-#     )
-
-#     # PIL
-#     image = Image.fromarray(
-#         frame_rgb
-#     )
-
-#     # Resize để hiển thị
-#     display_width = 800
-#     display_height = int(
-#         image.height *
-#         display_width /
-#         image.width
-#     )
-
-#     image = image.resize(
-#         (
-#             display_width,
-#             display_height
-#         )
-#     )
-
-#     photo = ImageTk.PhotoImage(
-#         image=image
-#     )
-
-#     camera_label.config(
-#         image=photo,
-#         text=""
-#     )
-
-#     # Giữ reference
-#     camera_label.image = photo
-
-#     # Lặp lại
-#     root.after(
-#         10,
-#         update_camera
-#     )
-
-# def update_camera():
-
-#     global camera_running
-
-#     if not camera_running:
-#         return
-
-#     if camera is None:
-#         return
-
-#     ret, frame = camera.read()
-
-#     if not ret:
-#         stop_camera()
-
-#         messagebox.showerror(
-#             "Camera Error",
-#             "Không đọc được hình ảnh từ camera."
-#         )
-
-#         return
-
-#     # Lật camera giống camera selfie
-#     frame = cv2.flip(frame, 1)
-
-#     # Nhận diện khuôn mặt
-#     frame = recognize_faces(frame)
-
-#     # BGR -> RGB
-#     frame_rgb = cv2.cvtColor(
-#         frame,
-#         cv2.COLOR_BGR2RGB
-#     )
-
-#     # Chuyển sang PIL
-#     image = Image.fromarray(frame_rgb)
-
-#     # ========================================================
-#     # FIT CAMERA VÀO KHUNG HIỂN THỊ
-#     # ========================================================
-
-#     # Lấy kích thước thực tế của vùng camera
-#     camera_frame.update_idletasks()
-
-#     max_width = camera_frame.winfo_width()
-#     max_height = camera_frame.winfo_height()
-
-#     # Nếu cửa sổ chưa lấy được kích thước
-#     if max_width <= 1 or max_height <= 1:
-#         root.after(10, update_camera)
-#         return
-
-#     # Kích thước ảnh gốc
-#     original_width, original_height = image.size
-
-#     # Tính tỷ lệ để ảnh nằm trọn trong khung
-#     scale_width = max_width / original_width
-#     scale_height = max_height / original_height
-
-#     scale = min(
-#         scale_width,
-#         scale_height
-#     )
-
-#     new_width = int(
-#         original_width * scale
-#     )
-
-#     new_height = int(
-#         original_height * scale
-#     )
-
-#     # Resize giữ nguyên tỉ lệ
-#     image = image.resize(
-#         (
-#             new_width,
-#             new_height
-#         ),
-#         Image.Resampling.LANCZOS
-#     )
-
-#     # ========================================================
-#     # TẠO NỀN ĐEN ĐỂ ẢNH KHÔNG BỊ CẮT
-#     # ========================================================
-
-#     background = Image.new(
-#         "RGB",
-#         (
-#             max_width,
-#             max_height
-#         ),
-#         "black"
-#     )
-
-#     # Căn giữa ảnh
-#     x = (max_width - new_width) // 2
-#     y = (max_height - new_height) // 2
-
-#     background.paste(
-#         image,
-#         (x, y)
-#     )
-
-#     # PIL -> Tkinter
-#     photo = ImageTk.PhotoImage(
-#         background
-#     )
-
-#     camera_label.config(
-#         image=photo,
-#         text=""
-#     )
-
-#     # Giữ reference để ảnh không bị garbage collector
-#     camera_label.image = photo
-
-#     # Lặp lại
-#     root.after(
-#         10,
-#         update_camera
-#     )
 
 def update_camera():
 
@@ -2209,55 +2118,7 @@ def update_camera():
 # CLEAR DATABASE INFO
 # ============================================================
 
-# def show_database():
 
-#     people = []
-
-#     if os.path.exists(FACES_DIR):
-
-#         for name in os.listdir(FACES_DIR):
-
-#             folder = os.path.join(
-#                 FACES_DIR,
-#                 name
-#             )
-
-#             if os.path.isdir(folder):
-
-#                 image_count = 0
-
-#                 for file in os.listdir(folder):
-
-#                     if file.lower().endswith(
-#                         (
-#                             ".jpg",
-#                             ".jpeg",
-#                             ".png",
-#                             ".bmp",
-#                             ".webp"
-#                         )
-#                     ):
-#                         image_count += 1
-
-#                 people.append(
-#                     f"- {name}: {image_count} ảnh"
-#                 )
-
-#     if not people:
-
-#         text = "Chưa có người nào được đăng ký."
-
-#     else:
-
-#         text = (
-#             "Danh sách người đã đăng ký:\n\n"
-#             + "\n".join(people)
-#         )
-
-#     messagebox.showinfo(
-#         "Database",
-#         text
-#     )
 
 def show_database():
 
@@ -2318,79 +2179,6 @@ def show_database():
 # WINDOW CLOSE
 # ============================================================
 
-# 
-
-# def on_close():
-
-#     global app_closing
-#     global camera
-#     global camera_running
-#     global camera_after_id
-
-#     # Tránh gọi hàm đóng nhiều lần
-#     if app_closing:
-#         return
-
-#     app_closing = True
-
-#     print("Đang đóng ứng dụng...")
-
-#     # ========================================================
-#     # DỪNG CAMERA
-#     # ========================================================
-
-#     camera_running = False
-
-#     # ========================================================
-#     # HỦY ROOT.AFTER
-#     # ========================================================
-
-#     if camera_after_id is not None:
-
-#         try:
-#             root.after_cancel(
-#                 camera_after_id
-#             )
-#         except:
-#             pass
-
-#         camera_after_id = None
-
-#     # ========================================================
-#     # GIẢI PHÓNG CAMERA
-#     # ========================================================
-
-#     if camera is not None:
-
-#         try:
-#             camera.release()
-#         except:
-#             pass
-
-#         camera = None
-
-#     # ========================================================
-#     # ĐÓNG OPENCV
-#     # ========================================================
-
-#     try:
-#         cv2.destroyAllWindows()
-#     except:
-#         pass
-
-#     # ========================================================
-#     # ĐÓNG TKINTER
-#     # ========================================================
-
-#     try:
-#         root.quit()
-#     except:
-#         pass
-
-#     try:
-#         root.destroy()
-#     except:
-#         pass
 
 def on_close():
 
