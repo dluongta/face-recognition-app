@@ -42,6 +42,13 @@ last_face_results = []
 
 recognition_frame_counter = 0
 
+# Số frame liên tiếp không phát hiện mặt
+no_face_counter = 0
+
+# Sau bao nhiêu frame không thấy mặt thì mới xóa box
+NO_FACE_TOLERANCE = 8
+
+
 # Kích thước hiển thị tối đa
 CAMERA_MAX_WIDTH = 960
 CAMERA_MAX_HEIGHT = 720
@@ -1129,16 +1136,30 @@ def recognize_faces(frame):
 
     global last_face_results
     global recognition_frame_counter
+    global no_face_counter
 
     recognition_frame_counter += 1
 
     # ========================================================
-    # DATABASE TRỐNG
+    # CHỈ NHẬN DIỆN MỖI N FRAME
     # ========================================================
 
-    if not person_encodings:
+    should_recognize = (
+        recognition_frame_counter % RECOGNITION_INTERVAL == 0
+        or not last_face_results
+    )
+
+    # ========================================================
+    # NHẬN DIỆN
+    # ========================================================
+
+    if should_recognize:
 
         try:
+
+            # ------------------------------------------------
+            # Resize frame
+            # ------------------------------------------------
 
             small_frame = cv2.resize(
                 frame,
@@ -1148,192 +1169,189 @@ def recognize_faces(frame):
                 interpolation=cv2.INTER_LINEAR
             )
 
-            rgb_small_frame = cv2.cvtColor(
-                small_frame,
-                cv2.COLOR_BGR2RGB
-            )
-
-            face_locations = face_recognition.face_locations(
-                rgb_small_frame,
-                model="hog"
-            )
-
-            # Luôn cập nhật vị trí khuôn mặt
-            last_face_results = []
-
-            for face_location in face_locations:
-
-                last_face_results.append(
-                    (
-                        face_location,
-                        "Unknown",
-                        ""
-                    )
-                )
-
-        except Exception as e:
-
-            print(
-                f"[RECOGNITION ERROR] {e}"
-            )
-
-    # ========================================================
-    # DATABASE CÓ DỮ LIỆU
-    # ========================================================
-
-    else:
-
-        try:
-
-            # ====================================================
-            # DETECT FACE MỖI FRAME
-            # ====================================================
-
-            small_frame = cv2.resize(
-                frame,
-                None,
-                fx=PROCESS_SCALE,
-                fy=PROCESS_SCALE,
-                interpolation=cv2.INTER_LINEAR
-            )
+            # ------------------------------------------------
+            # BGR -> RGB
+            # ------------------------------------------------
 
             rgb_small_frame = cv2.cvtColor(
                 small_frame,
                 cv2.COLOR_BGR2RGB
             )
 
+            # ------------------------------------------------
+            # Detect face
+            # ------------------------------------------------
+
             face_locations = face_recognition.face_locations(
                 rgb_small_frame,
                 model="hog"
             )
 
-            # Không có mặt
+            # =================================================
+            # KHÔNG THẤY MẶT
+            # =================================================
+
             if not face_locations:
 
-                last_face_results = []
+                no_face_counter += 1
+
+                # Không xóa ngay.
+                # Giữ box cũ trong một khoảng thời gian.
+                if no_face_counter >= NO_FACE_TOLERANCE:
+
+                    last_face_results = []
+
+            # =================================================
+            # CÓ MẶT
+            # =================================================
 
             else:
 
-                # =================================================
-                # ENCODING
-                #
-                # Nếu muốn % cập nhật liên tục:
-                # tính encoding ở MỖI FRAME.
-                # =================================================
-
-                face_encodings = (
-                    face_recognition.face_encodings(
-                        rgb_small_frame,
-                        known_face_locations=face_locations,
-                        num_jitters=1,
-                        model="small"
-                    )
-                )
-
-                results = []
+                no_face_counter = 0
 
                 # =================================================
-                # NHẬN DIỆN
+                # DATABASE TRỐNG
                 # =================================================
 
-                for face_encoding, face_location in zip(
-                    face_encodings,
-                    face_locations
-                ):
+                if not person_encodings:
 
-                    best_person = None
-                    best_distance = float("inf")
+                    last_face_results = []
 
-                    # =============================================
-                    # SO SÁNH VỚI DATABASE
-                    # =============================================
+                    for face_location in face_locations:
 
-                    for person_name, encodings in (
-                        person_encodings.items()
-                    ):
-
-                        if not encodings:
-                            continue
-
-                        distances = (
-                            face_recognition.face_distance(
-                                encodings,
-                                face_encoding
+                        last_face_results.append(
+                            (
+                                face_location,
+                                "Unknown",
+                                ""
                             )
                         )
 
-                        person_distance = float(
-                            np.min(distances)
-                        )
+                # =================================================
+                # DATABASE CÓ DỮ LIỆU
+                # =================================================
 
-                        if person_distance < best_distance:
+                else:
 
-                            best_distance = (
-                                person_distance
-                            )
-
-                            best_person = (
-                                person_name
-                            )
-
-                    # =============================================
-                    # CONFIDENCE
-                    # =============================================
-
-                    if (
-                        best_person is not None
-                        and best_distance != float("inf")
-                    ):
-
-                        confidence = (
-                            1.0 - best_distance
-                        ) * 100
-
-                        confidence = max(
-                            0.0,
-                            min(
-                                100.0,
-                                confidence
-                            )
-                        )
-
-                        confidence_text = (
-                            f"{confidence:.1f}%"
-                        )
-
-                    else:
-
-                        confidence_text = ""
-
-                    # =============================================
-                    # THRESHOLD
-                    # =============================================
-
-                    if (
-                        best_person is not None
-                        and best_distance
-                        <= FACE_DISTANCE_THRESHOLD
-                    ):
-
-                        name = best_person
-
-                    else:
-
-                        name = "Unknown"
-
-                    # =============================================
-                    # LƯU KẾT QUẢ
-                    # =============================================
-
-                    results.append(
-                        (
-                            face_location,
-                            name,
-                            confidence_text
+                    face_encodings = (
+                        face_recognition.face_encodings(
+                            rgb_small_frame,
+                            known_face_locations=face_locations,
+                            num_jitters=1,
+                            model="small"
                         )
                     )
 
-                last_face_results = results
+                    new_results = []
+
+                    # =================================================
+                    # NHẬN DIỆN TỪNG KHUÔN MẶT
+                    # =================================================
+
+                    for face_encoding, face_location in zip(
+                        face_encodings,
+                        face_locations
+                    ):
+
+                        best_person = None
+                        best_distance = float("inf")
+
+                        # -----------------------------------------
+                        # So sánh với database
+                        # -----------------------------------------
+
+                        for person_name, encodings in (
+                            person_encodings.items()
+                        ):
+
+                            if not encodings:
+                                continue
+
+                            distances = (
+                                face_recognition.face_distance(
+                                    encodings,
+                                    face_encoding
+                                )
+                            )
+
+                            person_distance = float(
+                                np.min(distances)
+                            )
+
+                            if person_distance < best_distance:
+
+                                best_distance = (
+                                    person_distance
+                                )
+
+                                best_person = (
+                                    person_name
+                                )
+
+                        # -----------------------------------------
+                        # Confidence
+                        # -----------------------------------------
+
+                        if (
+                            best_person is not None
+                            and best_distance != float("inf")
+                        ):
+
+                            confidence = (
+                                1.0 - best_distance
+                            ) * 100
+
+                            confidence = max(
+                                0.0,
+                                min(
+                                    100.0,
+                                    confidence
+                                )
+                            )
+
+                            confidence_text = (
+                                f"{confidence:.1f}%"
+                            )
+
+                        else:
+
+                            confidence_text = ""
+
+                        # -----------------------------------------
+                        # Threshold
+                        # -----------------------------------------
+
+                        if (
+                            best_person is not None
+                            and best_distance
+                            <= FACE_DISTANCE_THRESHOLD
+                        ):
+
+                            name = best_person
+
+                        else:
+
+                            name = "Unknown"
+
+                        # -----------------------------------------
+                        # Lưu kết quả mới
+                        # -----------------------------------------
+
+                        new_results.append(
+                            (
+                                face_location,
+                                name,
+                                confidence_text
+                            )
+                        )
+
+                    # =================================================
+                    # CHỈ CẬP NHẬT KHI CÓ KẾT QUẢ
+                    # =================================================
+
+                    if new_results:
+
+                        last_face_results = new_results
 
         except Exception as e:
 
@@ -1341,8 +1359,12 @@ def recognize_faces(frame):
                 f"[RECOGNITION ERROR] {e}"
             )
 
+            # Quan trọng:
+            # KHÔNG xóa last_face_results khi có lỗi.
+            # Giữ kết quả cũ để tránh nhấp nháy.
+
     # ========================================================
-    # VẼ KẾT QUẢ
+    # VẼ KẾT QUẢ CŨ / MỚI
     # ========================================================
 
     for (
@@ -1374,7 +1396,7 @@ def recognize_faces(frame):
         )
 
         # ====================================================
-        # GIỚI HẠN
+        # GIỚI HẠN FRAME
         # ====================================================
 
         height, width = frame.shape[:2]
@@ -1529,6 +1551,7 @@ def recognize_faces(frame):
         )
 
     return frame
+
 
 
 # ============================================================
