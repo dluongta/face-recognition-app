@@ -315,7 +315,7 @@ def register_person():
 
     if not name:
         messagebox.showwarning(
-            "Lỗi thiếu tên",
+            "Lỗi nhập thiếu tên",
             "Vui lòng nhập tên người cần đăng ký."
         )
         return
