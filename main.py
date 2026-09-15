@@ -1462,9 +1462,7 @@ def recognize_faces(frame):
 
         if confidence_text:
 
-            label += (
-                f" ({confidence_text})"
-            )
+            label += f" ({confidence_text})"
 
         text_size = cv2.getTextSize(
             label,
@@ -1473,46 +1471,53 @@ def recognize_faces(frame):
             2
         )[0]
 
-        label_width = (
-            text_size[0] + 10
-        )
+        label_width = text_size[0] + 10
+        label_height = text_size[1] + 10
 
-        label_height = (
-            text_size[1] + 10
-        )
+        # ====================================================
+        # ĐẶT LABEL PHÍA TRÊN + BÊN TRÁI BOX
+        # ====================================================
 
-        # Đặt label phía trên mặt
+        # Mép trái của label = mép trái của box khuôn mặt
+        label_left = left
+
+        # Mép phải của label
+        label_right = label_left + label_width
+
+        # Label nằm phía trên box
         label_top = top - label_height
 
-        # Cạnh phải label = cạnh phải mặt
-        label_right = right
+        # ====================================================
+        # NẾU LABEL BỊ TRÀN SANG PHẢI
+        # ====================================================
 
-        label_left = (
-            label_right
-            - label_width
-        )
+        if label_right > width:
 
-        # Không vượt trái
-        if label_left < 0:
+            label_right = width
+            label_left = max(
+                0,
+                label_right - label_width
+            )
 
-            label_left = 0
+        # ====================================================
+        # NẾU PHÍA TRÊN KHÔNG ĐỦ CHỖ
+        # ====================================================
 
-            label_right = label_width
-
-        # Không vượt trên
         if label_top < 0:
 
+            # Đưa label xuống ngay phía trên/đầu box
             label_top = 0
 
-        label_bottom = (
-            label_top
-            + label_height
-        )
+        label_bottom = label_top + label_height
 
-        # Không vượt dưới
+        # ====================================================
+        # GIỚI HẠN TRONG FRAME
+        # ====================================================
+
         if label_bottom > height:
 
             label_bottom = height
+
 
         # ====================================================
         # LABEL BACKGROUND
