@@ -964,6 +964,40 @@ def verify_uploaded_image():
                 color,
                 -1
             )
+            # Dịch nhãn sang trái một chút
+            LABEL_OFFSET_X = 2
+
+            label_left = max(
+                0,
+                left - LABEL_OFFSET_X
+            )
+
+            label_right = label_left + label_width
+
+            cv2.rectangle(
+                image,
+                (label_left, label_top),
+                (label_right, label_bottom),
+                color,
+                -1
+            )
+
+            cv2.putText(
+                image,
+                label,
+                (
+                    label_left + 6,
+                    label_top
+                    + text_size[1]
+                    + 5
+                ),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA
+            )
+
 
             cv2.putText(
                 image,
@@ -1065,41 +1099,6 @@ def verify_uploaded_image():
         )
 
         image_label.image = photo
-
-        # ====================================================
-        # TEXT RESULT
-        # ====================================================
-
-        result_text = (
-            "Kết quả xác minh:\n\n"
-        )
-
-        for index, (
-            name,
-            confidence_text
-        ) in enumerate(
-            results,
-            start=1
-        ):
-
-            result_text += (
-                f"Khuôn mặt {index}: "
-                f"{name} - "
-                f"confidence: "
-                f"{confidence_text}\n"
-            )
-
-        result_label = tk.Label(
-            result_window,
-            text=result_text,
-            font=("Arial", 14, "bold"),
-            fg="white",
-            bg="#202124"
-        )
-
-        result_label.pack(
-            pady=10
-        )
 
         # ====================================================
         # BUTTON
@@ -1478,8 +1477,13 @@ def recognize_faces(frame):
         # ĐẶT LABEL PHÍA TRÊN + BÊN TRÁI BOX
         # ====================================================
 
-        # Mép trái của label = mép trái của box khuôn mặt
-        label_left = left
+        # Dịch nhãn sang trái một chút
+        LABEL_OFFSET_X = 1
+
+        label_left = max(
+            0,
+            left - LABEL_OFFSET_X
+        )
 
         # Mép phải của label
         label_right = label_left + label_width
